@@ -4,7 +4,7 @@ set -Eeuo pipefail
 # -----------------------------------------------------------------------------
 # install-nemoclaw-conda.sh
 #
-# v12
+# v13
 #
 # Installs NemoClaw + OpenShell into a dedicated conda environment so the CLI
 # tooling stays contained. Docker still runs on the host.
@@ -30,7 +30,7 @@ set -Eeuo pipefail
 #
 # -----------------------------------------------------------------------------
 
-SCRIPT_VERSION="v12"
+SCRIPT_VERSION="v13"
 
 ENV_NAME="nemoclaw"
 NODE_VERSION="22"
@@ -43,6 +43,7 @@ MIN_OPEN_SHELL_VERSION="0.1.0"
 FORCE_REINSTALL="no"
 OLLAMA_BASE_URL=""
 OLLAMA_MODEL_ID=""
+SANDBOX_NAME=""
 
 log()  { printf '\n[%s] %s\n' "INFO" "$*"; }
 warn() { printf '\n[%s] %s\n' "WARN" "$*" >&2; }
@@ -64,6 +65,7 @@ Options:
   --openshell-version V      Install a specific OpenShell version
   --force-reinstall          Reinstall NemoClaw/OpenShell even if already present
   --skip-onboard             Do not run 'nemoclaw onboard'
+  --sandbox-name NAME        Sandbox name to use during onboarding
   --ollama-base-url URL      Custom remote Ollama/OpenAI-compatible base URL
   --ollama-model MODEL       Optional model id for non-interactive onboarding
   --version                  Print script version and exit
@@ -116,6 +118,10 @@ while [[ $# -gt 0 ]]; do
     --skip-onboard)
       RUN_ONBOARD="no"
       shift
+      ;;
+    --sandbox-name)
+      SANDBOX_NAME="${2:?missing value for --sandbox-name}"
+      shift 2
       ;;
     --ollama-base-url)
       OLLAMA_BASE_URL="${2:?missing value for --ollama-base-url}"
@@ -494,7 +500,9 @@ run_nemoclaw_onboard_with_policy_recovery() {
         fs.writeFileSync(path, JSON.stringify(data, null, 2));
       ' "$session_file"
       warn "Attempting onboarding recovery by resuming with policy presets skipped"
-      NEMOCLAW_POLICY_MODE=skip nemoclaw onboard --resume --non-interactive
+      NEMOCLAW_POLICY_MODE=skip \
+      NEMOCLAW_SANDBOX_NAME="${SANDBOX_NAME:-}" \
+      nemoclaw onboard --resume --non-interactive
       rm -f "$log_file"
       return
     fi
@@ -518,19 +526,28 @@ run_onboard() {
     normalized_base_url="$(normalize_remote_ollama_base_url "$OLLAMA_BASE_URL")"
 
     log "Using custom OpenAI-compatible endpoint for remote Ollama: $normalized_base_url"
+    if [[ -n "$SANDBOX_NAME" ]]; then
+      log "Using sandbox name: $SANDBOX_NAME"
+    fi
     if [[ -n "$OLLAMA_MODEL_ID" ]]; then
       log "Using custom model: $OLLAMA_MODEL_ID"
     fi
     log "Providing placeholder COMPATIBLE_API_KEY for non-interactive custom endpoint onboarding"
 
     NEMOCLAW_NON_INTERACTIVE=1 \
+    NEMOCLAW_SANDBOX_NAME="${SANDBOX_NAME:-}" \
     NEMOCLAW_PROVIDER=custom \
     NEMOCLAW_ENDPOINT_URL="$normalized_base_url" \
     NEMOCLAW_MODEL="${OLLAMA_MODEL_ID:-}" \
     COMPATIBLE_API_KEY="${COMPATIBLE_API_KEY:-ollama}" \
     run_nemoclaw_onboard_with_policy_recovery nemoclaw onboard --non-interactive
   else
-    nemoclaw onboard
+    if [[ -n "$SANDBOX_NAME" ]]; then
+      log "Using sandbox name: $SANDBOX_NAME"
+      NEMOCLAW_SANDBOX_NAME="$SANDBOX_NAME" nemoclaw onboard
+    else
+      nemoclaw onboard
+    fi
   fi
 }
 
