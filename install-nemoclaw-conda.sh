@@ -4,7 +4,7 @@ set -Eeuo pipefail
 # -----------------------------------------------------------------------------
 # install-nemoclaw-conda.sh
 #
-# v9
+# v11
 #
 # Installs NemoClaw + OpenShell into a dedicated conda environment so the CLI
 # tooling stays contained. Docker still runs on the host.
@@ -30,7 +30,7 @@ set -Eeuo pipefail
 #
 # -----------------------------------------------------------------------------
 
-SCRIPT_VERSION="v9"
+SCRIPT_VERSION="v11"
 
 ENV_NAME="nemoclaw"
 NODE_VERSION="22"
@@ -486,6 +486,14 @@ run_nemoclaw_onboard_with_policy_recovery() {
   if [[ "$status" -ne 0 ]]; then
     if [[ -f "$session_file" ]] && grep -Eq "Unimplemented|policy updates are not supported" "$log_file"; then
       warn "NemoClaw policy presets are not supported by the current gateway build"
+      warn "Clearing saved policy preset selections from the onboarding session"
+      node -e '
+        const fs = require("fs");
+        const path = process.argv[1];
+        const data = JSON.parse(fs.readFileSync(path, "utf8"));
+        data.policyPresets = [];
+        fs.writeFileSync(path, JSON.stringify(data, null, 2));
+      ' "$session_file"
       warn "Attempting onboarding recovery by resuming with policy presets skipped"
       NEMOCLAW_POLICY_MODE=skip nemoclaw onboard --resume --non-interactive
       return
