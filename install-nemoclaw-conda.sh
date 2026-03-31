@@ -4,7 +4,7 @@ set -Eeuo pipefail
 # -----------------------------------------------------------------------------
 # install-nemoclaw-conda.sh
 #
-# v6
+# v7
 #
 # Installs NemoClaw + OpenShell into a dedicated conda environment so the CLI
 # tooling stays contained. Docker still runs on the host.
@@ -25,11 +25,12 @@ set -Eeuo pipefail
 #   - Supports --force-reinstall
 #   - Only runs npm build if a build script actually exists
 #   - Prints installer version on startup
+#   - Supports custom Ollama base URL and model during onboarding
 #   - Optionally runs 'nemoclaw onboard'
 #
 # -----------------------------------------------------------------------------
 
-SCRIPT_VERSION="v6"
+SCRIPT_VERSION="v7"
 
 ENV_NAME="nemoclaw"
 NODE_VERSION="22"
@@ -39,6 +40,8 @@ ALLOW_PLACEHOLDER_NPM="no"
 RUN_ONBOARD="yes"
 OPEN_SHELL_VERSION=""   # optional: e.g. "0.0.16"
 FORCE_REINSTALL="no"
+OLLAMA_BASE_URL=""
+OLLAMA_MODEL_ID=""
 
 log()  { printf '\n[%s] %s\n' "INFO" "$*"; }
 warn() { printf '\n[%s] %s\n' "WARN" "$*" >&2; }
@@ -60,6 +63,8 @@ Options:
   --openshell-version V      Install a specific OpenShell version
   --force-reinstall          Reinstall NemoClaw/OpenShell even if already present
   --skip-onboard             Do not run 'nemoclaw onboard'
+  --ollama-base-url URL      Custom Ollama base URL, e.g. http://172.32.1.250:24601
+  --ollama-model MODEL       Optional Ollama model id for onboarding
   --version                  Print script version and exit
   --help                     Show this help
 
@@ -72,6 +77,8 @@ Notes:
     directory if it looks like a NemoClaw source tree.
   - Otherwise, it refuses to default to npm package 'nemoclaw' because that
     package name is currently unsafe/broken for the real CLI.
+  - For Ollama, use the native base URL without /v1, for example:
+      http://172.32.1.250:24601
 EOF
 }
 
@@ -109,6 +116,14 @@ while [[ $# -gt 0 ]]; do
       RUN_ONBOARD="no"
       shift
       ;;
+    --ollama-base-url)
+      OLLAMA_BASE_URL="${2:?missing value for --ollama-base-url}"
+      shift 2
+      ;;
+    --ollama-model)
+      OLLAMA_MODEL_ID="${2:?missing value for --ollama-model}"
+      shift 2
+      ;;
     --version)
       echo "$(basename "$0") ${SCRIPT_VERSION}"
       exit 0
@@ -144,6 +159,8 @@ need_cmd curl
 need_cmd tar
 need_cmd install
 need_cmd grep
+need_cmd node
+need_cmd npm
 
 safe_eval_conda_hook() {
   set +u
@@ -234,9 +251,11 @@ detect_source_tree() {
 }
 
 has_npm_build_script() {
-  local value
-  value="$(npm pkg get scripts.build 2>/dev/null || true)"
-  [[ -n "$value" && "$value" != "null" ]]
+  node -e '
+    const fs = require("fs");
+    const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+    process.exit(pkg.scripts && typeof pkg.scripts.build === "string" && pkg.scripts.build.trim() ? 0 : 1);
+  ' >/dev/null 2>&1
 }
 
 install_nemoclaw_from_source() {
@@ -409,6 +428,37 @@ verify_in_env() {
   esac
 }
 
+run_onboard() {
+  if [[ "$RUN_ONBOARD" != "yes" ]]; then
+    log "Skipping onboarding as requested"
+    return
+  fi
+
+  log "Running NemoClaw onboarding"
+
+  if [[ -n "$OLLAMA_BASE_URL" ]]; then
+    local onboard_cmd=(nemoclaw onboard
+      --non-interactive
+      --auth-choice ollama
+      --custom-base-url "$OLLAMA_BASE_URL"
+      --accept-risk
+    )
+
+    if [[ -n "$OLLAMA_MODEL_ID" ]]; then
+      onboard_cmd+=(--custom-model-id "$OLLAMA_MODEL_ID")
+    fi
+
+    log "Using custom Ollama base URL: $OLLAMA_BASE_URL"
+    if [[ -n "$OLLAMA_MODEL_ID" ]]; then
+      log "Using custom Ollama model: $OLLAMA_MODEL_ID"
+    fi
+
+    "${onboard_cmd[@]}"
+  else
+    nemoclaw onboard
+  fi
+}
+
 write_conda_hooks
 choose_nemoclaw_install_method
 verify_nemoclaw_launcher
@@ -425,12 +475,7 @@ echo "  nemoclaw:  $(command -v nemoclaw)"
 echo "  openshell: $(command -v openshell)"
 openshell --version || true
 
-if [[ "$RUN_ONBOARD" == "yes" ]]; then
-  log "Running NemoClaw onboarding"
-  nemoclaw onboard
-else
-  log "Skipping onboarding as requested"
-fi
+run_onboard
 
 if ! echo "$PATH" | tr ':' '\n' | grep -Fxq "$CONDA_PREFIX/npm-global/bin"; then
   warn "$CONDA_PREFIX/npm-global/bin is not on PATH in the current shell"
