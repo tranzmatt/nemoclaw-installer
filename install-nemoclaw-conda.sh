@@ -4,7 +4,7 @@ set -Eeuo pipefail
 # -----------------------------------------------------------------------------
 # install-nemoclaw-conda.sh
 #
-# v7
+# v8
 #
 # Installs NemoClaw + OpenShell into a dedicated conda environment so the CLI
 # tooling stays contained. Docker still runs on the host.
@@ -25,12 +25,12 @@ set -Eeuo pipefail
 #   - Supports --force-reinstall
 #   - Only runs npm build if a build script actually exists
 #   - Prints installer version on startup
-#   - Supports custom Ollama base URL and model during onboarding
+#   - Supports custom OpenAI-compatible endpoints such as remote Ollama during onboarding
 #   - Optionally runs 'nemoclaw onboard'
 #
 # -----------------------------------------------------------------------------
 
-SCRIPT_VERSION="v7"
+SCRIPT_VERSION="v8"
 
 ENV_NAME="nemoclaw"
 NODE_VERSION="22"
@@ -63,8 +63,8 @@ Options:
   --openshell-version V      Install a specific OpenShell version
   --force-reinstall          Reinstall NemoClaw/OpenShell even if already present
   --skip-onboard             Do not run 'nemoclaw onboard'
-  --ollama-base-url URL      Custom Ollama base URL, e.g. http://172.32.1.250:24601
-  --ollama-model MODEL       Optional Ollama model id for onboarding
+  --ollama-base-url URL      Custom remote Ollama/OpenAI-compatible base URL
+  --ollama-model MODEL       Optional model id for non-interactive onboarding
   --version                  Print script version and exit
   --help                     Show this help
 
@@ -77,7 +77,7 @@ Notes:
     directory if it looks like a NemoClaw source tree.
   - Otherwise, it refuses to default to npm package 'nemoclaw' because that
     package name is currently unsafe/broken for the real CLI.
-  - For Ollama, use the native base URL without /v1, for example:
+  - For remote Ollama, use the native base URL without /v1, for example:
       http://172.32.1.250:24601
 EOF
 }
@@ -428,6 +428,27 @@ verify_in_env() {
   esac
 }
 
+normalize_remote_ollama_base_url() {
+  local raw="$1"
+
+  [[ -n "$raw" ]] || {
+    err "Empty remote Ollama base URL"
+    exit 1
+  }
+
+  if [[ "$raw" =~ ^https?://[^/]+$ ]]; then
+    printf '%s/v1\n' "$raw"
+    return
+  fi
+
+  if [[ "$raw" =~ ^https?://[^/]+/$ ]]; then
+    printf '%sv1\n' "$raw"
+    return
+  fi
+
+  printf '%s\n' "${raw%/}"
+}
+
 run_onboard() {
   if [[ "$RUN_ONBOARD" != "yes" ]]; then
     log "Skipping onboarding as requested"
@@ -437,23 +458,21 @@ run_onboard() {
   log "Running NemoClaw onboarding"
 
   if [[ -n "$OLLAMA_BASE_URL" ]]; then
-    local onboard_cmd=(nemoclaw onboard
-      --non-interactive
-      --auth-choice ollama
-      --custom-base-url "$OLLAMA_BASE_URL"
-      --accept-risk
-    )
+    local normalized_base_url
+    normalized_base_url="$(normalize_remote_ollama_base_url "$OLLAMA_BASE_URL")"
 
+    log "Using custom OpenAI-compatible endpoint for remote Ollama: $normalized_base_url"
     if [[ -n "$OLLAMA_MODEL_ID" ]]; then
-      onboard_cmd+=(--custom-model-id "$OLLAMA_MODEL_ID")
+      log "Using custom model: $OLLAMA_MODEL_ID"
     fi
+    log "Providing placeholder COMPATIBLE_API_KEY for non-interactive custom endpoint onboarding"
 
-    log "Using custom Ollama base URL: $OLLAMA_BASE_URL"
-    if [[ -n "$OLLAMA_MODEL_ID" ]]; then
-      log "Using custom Ollama model: $OLLAMA_MODEL_ID"
-    fi
-
-    "${onboard_cmd[@]}"
+    NEMOCLAW_NON_INTERACTIVE=1 \
+    NEMOCLAW_PROVIDER=custom \
+    NEMOCLAW_ENDPOINT_URL="$normalized_base_url" \
+    NEMOCLAW_MODEL="${OLLAMA_MODEL_ID:-}" \
+    COMPATIBLE_API_KEY="${COMPATIBLE_API_KEY:-ollama}" \
+    nemoclaw onboard --non-interactive
   else
     nemoclaw onboard
   fi
