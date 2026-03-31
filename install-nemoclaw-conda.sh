@@ -39,6 +39,7 @@ NPM_PACKAGE=""
 ALLOW_PLACEHOLDER_NPM="no"
 RUN_ONBOARD="yes"
 OPEN_SHELL_VERSION=""   # optional: e.g. "0.0.16"
+MIN_OPEN_SHELL_VERSION="0.1.0"
 FORCE_REINSTALL="no"
 OLLAMA_BASE_URL=""
 OLLAMA_MODEL_ID=""
@@ -348,13 +349,33 @@ verify_nemoclaw_launcher() {
   }
 }
 
+extract_semver() {
+  local value="$1"
+  sed -n 's/.*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' <<<"$value" | head -n1
+}
+
+version_ge() {
+  local left="$1"
+  local right="$2"
+  [[ "$left" == "$right" ]] && return 0
+  [[ "$(printf '%s\n%s\n' "$right" "$left" | sort -V | tail -n1)" == "$left" ]]
+}
+
 install_openshell() {
   local version="$1"
-  local arch os url tmpdir tarball extracted_bin api_url
+  local arch os url tmpdir tarball extracted_bin api_url current_version current_output
 
   if [[ "$FORCE_REINSTALL" != "yes" && -x "$CONDA_PREFIX/bin/openshell" ]]; then
-    log "OpenShell already present at $CONDA_PREFIX/bin/openshell, skipping download"
-    return
+    current_output="$("$CONDA_PREFIX/bin/openshell" --version 2>/dev/null || true)"
+    current_version="$(extract_semver "$current_output")"
+
+    if [[ -n "$current_version" ]] && version_ge "$current_version" "$MIN_OPEN_SHELL_VERSION"; then
+      log "OpenShell already present at $CONDA_PREFIX/bin/openshell (version $current_version), skipping download"
+      return
+    fi
+
+    warn "Existing OpenShell version '${current_version:-unknown}' is older than required minimum ${MIN_OPEN_SHELL_VERSION}"
+    warn "Upgrading OpenShell in $CONDA_PREFIX/bin"
   fi
 
   case "$(uname -m)" in
