@@ -470,6 +470,30 @@ normalize_remote_ollama_base_url() {
   printf '%s\n' "${raw%/}"
 }
 
+run_nemoclaw_onboard_with_policy_recovery() {
+  local session_file="${HOME}/.nemoclaw/onboard-session.json"
+  local log_file
+  local status=0
+
+  log_file="$(mktemp)"
+  trap 'rm -f "$log_file"' RETURN
+
+  set +e
+  "$@" 2>&1 | tee "$log_file"
+  status=${PIPESTATUS[0]}
+  set -e
+
+  if [[ "$status" -ne 0 ]]; then
+    if [[ -f "$session_file" ]] && grep -Eq "Unimplemented|policy updates are not supported" "$log_file"; then
+      warn "NemoClaw policy presets are not supported by the current gateway build"
+      warn "Attempting onboarding recovery by resuming with policy presets skipped"
+      NEMOCLAW_POLICY_MODE=skip nemoclaw onboard --resume --non-interactive
+      return
+    fi
+    return "$status"
+  fi
+}
+
 run_onboard() {
   if [[ "$RUN_ONBOARD" != "yes" ]]; then
     log "Skipping onboarding as requested"
@@ -493,7 +517,7 @@ run_onboard() {
     NEMOCLAW_ENDPOINT_URL="$normalized_base_url" \
     NEMOCLAW_MODEL="${OLLAMA_MODEL_ID:-}" \
     COMPATIBLE_API_KEY="${COMPATIBLE_API_KEY:-ollama}" \
-    nemoclaw onboard --non-interactive
+    run_nemoclaw_onboard_with_policy_recovery nemoclaw onboard --non-interactive
   else
     nemoclaw onboard
   fi
