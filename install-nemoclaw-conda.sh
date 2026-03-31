@@ -4,7 +4,7 @@ set -Eeuo pipefail
 # -----------------------------------------------------------------------------
 # install-nemoclaw-conda.sh
 #
-# v11
+# v12
 #
 # Installs NemoClaw + OpenShell into a dedicated conda environment so the CLI
 # tooling stays contained. Docker still runs on the host.
@@ -30,7 +30,7 @@ set -Eeuo pipefail
 #
 # -----------------------------------------------------------------------------
 
-SCRIPT_VERSION="v11"
+SCRIPT_VERSION="v12"
 
 ENV_NAME="nemoclaw"
 NODE_VERSION="22"
@@ -476,7 +476,6 @@ run_nemoclaw_onboard_with_policy_recovery() {
   local status=0
 
   log_file="$(mktemp)"
-  trap 'rm -f "$log_file"' RETURN
 
   set +e
   "$@" 2>&1 | tee "$log_file"
@@ -496,10 +495,14 @@ run_nemoclaw_onboard_with_policy_recovery() {
       ' "$session_file"
       warn "Attempting onboarding recovery by resuming with policy presets skipped"
       NEMOCLAW_POLICY_MODE=skip nemoclaw onboard --resume --non-interactive
+      rm -f "$log_file"
       return
     fi
+    rm -f "$log_file"
     return "$status"
   fi
+
+  rm -f "$log_file"
 }
 
 run_onboard() {
