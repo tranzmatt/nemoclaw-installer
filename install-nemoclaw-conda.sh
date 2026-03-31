@@ -4,7 +4,7 @@ set -Eeuo pipefail
 # -----------------------------------------------------------------------------
 # install-nemoclaw-conda.sh
 #
-# v8
+# v9
 #
 # Installs NemoClaw + OpenShell into a dedicated conda environment so the CLI
 # tooling stays contained. Docker still runs on the host.
@@ -30,7 +30,7 @@ set -Eeuo pipefail
 #
 # -----------------------------------------------------------------------------
 
-SCRIPT_VERSION="v8"
+SCRIPT_VERSION="v9"
 
 ENV_NAME="nemoclaw"
 NODE_VERSION="22"
